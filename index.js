@@ -1,6 +1,4 @@
-// ✅ เวอร์ชันประหยัดโควต้า Browserless + รันวนอัตโนมัติทุก 35 วิ โดยเปิด browser แค่ครั้งเดียว
-
-import puppeteer from "puppeteer-core";
+import puppeteer from "puppeteer";
 import sharp from "sharp";
 import fs from "fs/promises";
 import axios from "axios";
@@ -10,7 +8,6 @@ import crypto from "crypto";
 
 dotenv.config();
 
-const browserlessToken = process.env.BROWSERLESS_TOKEN;
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 
 const chatIdMap = {
@@ -207,8 +204,9 @@ async function runOnce(page) {
 }
 
 async function runLoop() {
-  const browser = await puppeteer.connect({
-    browserWSEndpoint: `wss://production-sfo.browserless.io?token=${browserlessToken}`,
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   const page = await browser.newPage();
@@ -224,4 +222,7 @@ async function runLoop() {
   }
 }
 
-runLoop();
+runLoop().catch((err) => {
+  console.error("❌ เกิดข้อผิดพลาด:", err.message);
+  process.exit(1);
+});
