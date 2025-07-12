@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: baccarat-bot
+    env: node
+    plan: free
+    buildCommand: bash render-build.sh
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
