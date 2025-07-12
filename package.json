@@ -8,7 +8,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "puppeteer": "^21.3.8",               ← ✅ ใช้ puppeteer ตัวเต็ม
+    "puppeteer": "^21.3.8",
     "sharp": "^0.33.1",
     "dotenv": "^16.3.1",
     "axios": "^1.6.7",
