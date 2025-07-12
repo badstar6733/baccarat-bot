@@ -3,8 +3,18 @@ services:
     name: baccarat-bot
     env: node
     plan: free
-    buildCommand: bash render-build.sh
+    buildCommand: |
+      npm install
+      npx puppeteer install chrome
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 20
+      - key: TELEGRAM_BOT_TOKEN
+        fromSecret: TELEGRAM_BOT_TOKEN
+      - key: CHAT_ID_SA
+        fromSecret: CHAT_ID_SA
+      - key: CHAT_ID_WM
+        fromSecret: CHAT_ID_WM
+      - key: BROWSERLESS_TOKEN
+        fromSecret: BROWSERLESS_TOKEN
