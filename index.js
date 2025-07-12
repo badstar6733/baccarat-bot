@@ -1,4 +1,4 @@
-// ✅ Baccarat Bot 24/7 Version (Render + Local Chromium)
+// ✅ Baccarat Bot 24/7 Version (Render + Puppeteer + แนวทางจาก icon หน้าเว็บจริง)
 import puppeteer from "puppeteer";
 import sharp from "sharp";
 import fs from "fs/promises";
@@ -11,6 +11,7 @@ import fetch from "node-fetch";
 
 dotenv.config();
 
+const browserlessToken = process.env.BROWSERLESS_TOKEN; // ยังใช้ตัวแปรไว้เผื่ออนาคต
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
 const chatIdMap = {
   "SA gaming": process.env.CHAT_ID_SA,
@@ -77,30 +78,14 @@ async function sendToTelegramText(message) {
   }
 }
 
-async function connectBrowser() {
-  return await puppeteer.launch({ headless: "new" });
-}
-
-async function safeGoto(page, url, maxRetries = 2) {
-  for (let i = 1; i <= maxRetries; i++) {
-    try {
-      await page.goto(url, { waitUntil: "load", timeout: 45000 });
-      return;
-    } catch (err) {
-      console.warn(`⏳ Goto retry ${i}/${maxRetries}: ${err.message}`);
-      if (i === maxRetries) throw err;
-      await delay(3000);
-    }
-  }
-}
-
 async function processCamp(campName) {
   let browser;
+  const startTime = Date.now();
   try {
-    browser = await connectBrowser();
+    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
-    await safeGoto(page, targetUrl);
+    await page.goto(targetUrl, { waitUntil: "load", timeout: 45000 });
     await page.waitForSelector(".heng99-baccarat-provider-item__link", { timeout: 10000 });
 
     const providerLinks = await page.$$(".heng99-baccarat-provider-item__link");
@@ -197,15 +182,14 @@ async function processCamp(campName) {
     await sendToTelegramText(`⚠️ ${campName} เกิดปัญหา: ${err.message}`);
     if (browser) await browser.close().catch(() => {});
   }
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`✅ ${campName} เสร็จใน ${elapsed} วินาที`);
 }
 
 async function run() {
-  const start = Date.now();
   console.log("⏳ เริ่มทำงาน:", new Date().toLocaleString("th-TH"));
   await Promise.all(TARGET_CAMPS.map(processCamp));
-  const end = Date.now();
-  const seconds = ((end - start) / 1000).toFixed(1);
-  console.log(`✅ เสร็จสิ้นรอบ (ใช้เวลา ${seconds} วินาที)\n`);
+  console.log("✅ เสร็จสิ้นรอบ\n");
 }
 
 async function loop() {
@@ -218,15 +202,15 @@ async function loop() {
 }
 loop();
 
-// 🌐 Web Server เพื่อป้องกัน Replit/Render หลับ
+// 🌐 Web Server เพื่อป้องกัน Render/Replit หลับ
 http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Bot is running ✅");
 }).listen(3000);
 
-// 🔁 Self-ping ทุก 5 นาที
+// 🔁 Self-ping ตัวเองทุก 5 นาที
 setInterval(() => {
-  fetch("https://your-render-url.onrender.com")
+  fetch("https://08cd7a74-8342-4043-8f89-54c2b80ec3cc-00-3mqn3yzo42h0g.sisko.replit.dev/")
     .then(() => console.log("📡 Self-ping OK"))
-    .catch(err => console.error("❌ Self-ping failed", err.message));
+    .catch((err) => console.error("❌ Self-ping failed", err.message));
 }, 300000);
