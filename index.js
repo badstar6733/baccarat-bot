@@ -1,3 +1,4 @@
+// ✅ Baccarat Bot 24/7 Version (Render + Local Chromium)
 import puppeteer from "puppeteer";
 import sharp from "sharp";
 import fs from "fs/promises";
@@ -5,16 +6,16 @@ import axios from "axios";
 import FormData from "form-data";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import http from "http";
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
-
 const chatIdMap = {
   "SA gaming": process.env.CHAT_ID_SA,
   "WM casino": process.env.CHAT_ID_WM,
 };
-
 const targetUrl = "https://bng55.enterprises/baccarat-formula/";
 const logoPath = "logo.png";
 const TARGET_CAMPS = ["SA gaming", "WM casino"];
@@ -53,7 +54,6 @@ async function sendToTelegram(filePath, roomNumber, campName = "", extraCaption 
   if (!chatId) return;
 
   const caption = `🎲 ${campName} | ห้อง ${roomStr}\n\n${extraCaption}`;
-
   const form = new FormData();
   form.append("chat_id", chatId);
   form.append("caption", caption);
@@ -67,162 +67,166 @@ async function sendToTelegram(filePath, roomNumber, campName = "", extraCaption 
   console.log(`✅ ส่งห้อง ${roomStr} (${campName}) เรียบร้อย`);
 }
 
-async function analyzeAndSend(page, campName, roomIndex) {
-  const content = await page.$(".heng99-baccarat-content");
-  const tempPath = `temp_${campName}_${roomIndex + 1}.jpg`;
-  const finalPath = `final_${campName}_${roomIndex + 1}.jpg`;
-  await content.screenshot({ path: tempPath });
-
-  const hash = await calculateHash(tempPath);
-  const roomKey = `${campName}_${roomIndex + 1}`;
-  if (roomHashes.get(roomKey) === hash) {
-    await fs.unlink(tempPath);
-    return;
+async function sendToTelegramText(message) {
+  for (const camp in chatIdMap) {
+    const chatId = chatIdMap[camp];
+    await axios.post(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+      chat_id: chatId,
+      text: message,
+    });
   }
-  roomHashes.set(roomKey, hash);
-
-  const last10 = await content.$$eval("img", (imgs) =>
-    imgs
-      .map((img) => img.getAttribute("src") || "")
-      .filter((src) =>
-        src.includes("icon-banker") ||
-        src.includes("icon-player") ||
-        src.includes("icon-tie")
-      )
-      .slice(-10)
-      .map((src) => {
-        if (src.includes("icon-banker")) return "B";
-        if (src.includes("icon-player")) return "P";
-        if (src.includes("icon-tie")) return "T";
-        return "?";
-      })
-  );
-
-  let extraCaption = "❌ ไม่มีข้อมูลไพ่ย้อนหลัง";
-
-  if (last10.length > 0) {
-    const count = (v) => last10.filter((x) => x === v).length;
-    const percent = (n) => Math.round((n / last10.length) * 100);
-    const emojiMap = { B: "🟥", P: "🟦", T: "🟩" };
-
-    const winrate = `📊 สถิติ 10 ตาหลังสุด\n🟥 Banker: ${percent(count("B"))}%\n🟦 Player: ${percent(count("P"))}%\n🟩 Tie: ${percent(count("T"))}%`;
-
-    const last10Plays = last10.map((x) => emojiMap[x]);
-    const line1 = last10Plays.slice(0, 5).join(" ");
-    const line2 = last10Plays.slice(5).join(" ");
-    const recentFull = `${line1}\n${line2}`;
-
-    const lastPlays = last10.filter((x) => x === "B" || x === "P");
-
-    const detectDragon = (arr) => {
-      if (arr.length < 4) return null;
-      let streak = 1;
-      for (let i = 1; i < arr.length; i++) {
-        if (arr[i] === arr[i - 1]) {
-          streak++;
-          if (streak >= 4) return arr[i];
-        } else {
-          streak = 1;
-        }
-      }
-      return null;
-    };
-
-    const detectPingPong = (arr) => {
-      if (arr.length < 5) return false;
-      for (let i = 2; i < arr.length; i++) {
-        if (arr[i] !== arr[i - 2]) return false;
-      }
-      return true;
-    };
-
-    const dragon = detectDragon(lastPlays);
-    const isPingPong = detectPingPong(lastPlays);
-
-    let suggestion = "";
-    if (dragon) {
-      const side = dragon === "B" ? "🟥 Banker" : "🟦 Player";
-      suggestion = `✅ คำแนะนำ: แทง ${side}`;
-    } else if (isPingPong) {
-      const next = lastPlays.at(-1) === "B" ? "🟦 Player" : "🟥 Banker";
-      suggestion = `✅ คำแนะนำ: แทง ${next}`;
-    } else {
-      const b = count("B"), p = count("P");
-      suggestion = b >= p
-        ? `✅ คำแนะนำ: แทง 🟥 Banker`
-        : `✅ คำแนะนำ: แทง 🟦 Player`;
-    }
-
-    extraCaption = `${winrate}\n\n🎴 เค้าไพ่ล่าสุด\n${recentFull}\n\n📈 วิเคราะห์ไพ่\n${suggestion}`;
-  }
-
-  await cropSquareAddLogo(tempPath, finalPath);
-  await sendToTelegram(finalPath, roomIndex + 1, campName, extraCaption);
-  await fs.unlink(tempPath).catch(() => {});
-  await fs.unlink(finalPath).catch(() => {});
 }
 
-async function runOnce(page) {
-  console.log("⏳ เริ่มทำงาน:", new Date().toLocaleString("th-TH"));
+async function connectBrowser() {
+  return await puppeteer.launch({ headless: "new" });
+}
 
-  await page.goto(targetUrl, { waitUntil: "networkidle2", timeout: 120000 });
-
-  for (let campName of TARGET_CAMPS) {
+async function safeGoto(page, url, maxRetries = 2) {
+  for (let i = 1; i <= maxRetries; i++) {
     try {
-      const providerLinks = await page.$$(".heng99-baccarat-provider-item__link");
-      for (let link of providerLinks) {
-        const img = await link.$("img");
-        const name = await page.evaluate((el) => el.alt, img);
-        if (name === campName) {
-          await link.click();
-          await delay(1500);
-          await page.waitForSelector(".heng99-baccarat-content-room__name", { timeout: 10000 });
-
-          const rooms = await page.$$(".heng99-baccarat-content-room__name");
-          const indexes = [0, 1, 2, 3, 4, 5];
-          for (const i of indexes) {
-            if (i >= rooms.length) continue;
-            try {
-              await rooms[i].click();
-              await page.waitForSelector(".heng99-baccarat-content", { timeout: 8000 });
-              await delay(1000);
-              await analyzeAndSend(page, campName, i);
-              break;
-            } catch {
-              continue;
-            }
-          }
-          break;
-        }
-      }
+      await page.goto(url, { waitUntil: "load", timeout: 45000 });
+      return;
     } catch (err) {
-      console.warn(`⚠️ ${campName}: ${err.message}`);
+      console.warn(`⏳ Goto retry ${i}/${maxRetries}: ${err.message}`);
+      if (i === maxRetries) throw err;
+      await delay(3000);
     }
   }
-
-  console.log("✅ เสร็จสิ้นรอบ\n");
 }
 
-async function runLoop() {
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+async function processCamp(campName) {
+  let browser;
+  try {
+    browser = await connectBrowser();
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
+    await safeGoto(page, targetUrl);
+    await page.waitForSelector(".heng99-baccarat-provider-item__link", { timeout: 10000 });
 
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 800 });
+    const providerLinks = await page.$$(".heng99-baccarat-provider-item__link");
+    for (let link of providerLinks) {
+      const img = await link.$("img");
+      const name = await page.evaluate((el) => el.alt, img);
+      if (name !== campName) continue;
 
-  while (true) {
-    const start = Date.now();
-    await runOnce(page);
-    const elapsed = Date.now() - start;
-    const delayMs = Math.max(35000 - elapsed, 1000);
-    console.log(`⏳ รออีก ${(delayMs / 1000).toFixed(1)} วิ\n`);
-    await delay(delayMs);
+      console.log(`🚪 เข้าแคมป์: ${campName}`);
+      await link.click();
+      await delay(1000);
+
+      const roomButtons = await page.$$(".heng99-baccarat-content-room__name");
+
+      for (let roomNumber = 1; roomNumber <= roomButtons.length; roomNumber++) {
+        try {
+          const btn = roomButtons[roomNumber - 1];
+          if (!btn) throw new Error("ไม่พบห้องที่ระบุ");
+
+          await btn.click();
+          await page.waitForSelector(".heng99-baccarat-content", { timeout: 6000 });
+          await delay(600);
+
+          const content = await page.$(".heng99-baccarat-content");
+          const tempPath = `temp_${campName}_${roomNumber}.jpg`;
+          const finalPath = `final_${campName}_${roomNumber}.jpg`;
+          await content.screenshot({ path: tempPath });
+
+          const hash = await calculateHash(tempPath);
+          const roomKey = `${campName}_${roomNumber}`;
+          if (roomHashes.get(roomKey) === hash) {
+            await fs.unlink(tempPath);
+            continue;
+          }
+          roomHashes.set(roomKey, hash);
+
+          const last10 = await content.$$eval("img", (imgs) =>
+            imgs
+              .filter((img) => {
+                const src = img.getAttribute("src") || "";
+                return src.includes("icon-banker") || src.includes("icon-player") || src.includes("icon-tie") || src.includes("icon-player-orange");
+              })
+              .slice(-10)
+              .map((img) => {
+                const src = img.getAttribute("src") || "";
+                if (src.includes("icon-player-orange") || src.includes("icon-player")) return "P";
+                if (src.includes("icon-banker")) return "B";
+                if (src.includes("icon-tie")) return "T";
+                return "?";
+              })
+          );
+
+          let suggestion = "ไม่พบข้อมูลแนวโน้ม";
+          try {
+            await page.waitForSelector(".heng99-baccarat-content-next-result__icon img[alt*='Icon']", { timeout: 2000 });
+            const nextIcon = await page.$$eval(".heng99-baccarat-content-next-result__icon img", (imgs) => {
+              for (const img of imgs) {
+                const alt = img.getAttribute("alt") || "";
+                if (alt.includes("BANKER")) return "B";
+                if (alt.includes("PLAYER")) return "P";
+              }
+              return null;
+            });
+            if (nextIcon === "B" || nextIcon === "P") {
+              suggestion = `✅ คำแนะนำ: แทง ${nextIcon === "B" ? "🟥 Banker" : "🔵 Player"}`;
+            }
+          } catch (e) {
+            suggestion = "ไม่พบข้อมูลแนวโน้ม";
+          }
+
+          const count = (v) => last10.filter((x) => x === v).length;
+          const percent = (n) => Math.round((n / last10.length) * 100);
+          const emojiMap = { B: "🟥", P: "🔵", T: "🟩" };
+          const winrate = `📊 สถิติ 10 ตาหลังสุด\n🟥 Banker: ${percent(count("B"))}%\n🔵 Player: ${percent(count("P"))}%\n🟩 Tie: ${percent(count("T"))}%`;
+          const last10Plays = last10.map((x) => emojiMap[x]);
+          const recentFull = `${last10Plays.slice(0, 5).join(" ")}\n${last10Plays.slice(5).join(" ")}`;
+
+          const extraCaption = `${winrate}\n\n🎴 เค้าไพ่ล่าสุด\n${recentFull}\n\n📈 วิเคราะห์ไพ่\n${suggestion}`;
+
+          await cropSquareAddLogo(tempPath, finalPath);
+          await sendToTelegram(finalPath, roomNumber, campName, extraCaption);
+          await fs.unlink(tempPath).catch(() => {});
+          await fs.unlink(finalPath).catch(() => {});
+          break;
+        } catch (err) {
+          console.warn(`⚠️ ห้อง ${roomNumber.toString().padStart(2, "0")} (${campName}) เข้าไม่ได้: ${err.message}`);
+        }
+      }
+      break;
+    }
+    await browser.close();
+  } catch (err) {
+    console.warn(`⚠️ ${campName}: ${err.message}`);
+    await sendToTelegramText(`⚠️ ${campName} เกิดปัญหา: ${err.message}`);
+    if (browser) await browser.close().catch(() => {});
   }
 }
 
-runLoop().catch((err) => {
-  console.error("❌ เกิดข้อผิดพลาด:", err.message);
-  process.exit(1);
-});
+async function run() {
+  const start = Date.now();
+  console.log("⏳ เริ่มทำงาน:", new Date().toLocaleString("th-TH"));
+  await Promise.all(TARGET_CAMPS.map(processCamp));
+  const end = Date.now();
+  const seconds = ((end - start) / 1000).toFixed(1);
+  console.log(`✅ เสร็จสิ้นรอบ (ใช้เวลา ${seconds} วินาที)\n`);
+}
+
+async function loop() {
+  try {
+    await run();
+  } catch (err) {
+    console.error("💥 ERROR ใน loop:", err.message);
+  }
+  setTimeout(loop, 25000);
+}
+loop();
+
+// 🌐 Web Server เพื่อป้องกัน Replit/Render หลับ
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("Bot is running ✅");
+}).listen(3000);
+
+// 🔁 Self-ping ทุก 5 นาที
+setInterval(() => {
+  fetch("https://your-render-url.onrender.com")
+    .then(() => console.log("📡 Self-ping OK"))
+    .catch(err => console.error("❌ Self-ping failed", err.message));
+}, 300000);
